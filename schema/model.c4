@@ -1,0 +1,245 @@
+model {
+
+    customer = externalActor 'Customer' {}
+    seller = actor 'Seller' {
+        description 'Operates with order, confiems manufacturing for the user'
+    }
+    api_user = externalActor 'API user' {}
+    operator = actor 'Operator' {
+        description 'Takes order in work, manufactures jewerly'
+    }
+    support = actor 'Support' {
+        description 'Check services states'
+    }
+
+    store = system 'Jeverly Store System' {
+        rmq = queue 'Message Queue' {
+            description 'Send messages about new orders, changes of statuses between containers, has several topics'
+            icon tech:rabbitmq
+            metadata {
+                broker 'RabbitMQ'
+            }
+        }
+
+        s3 = storage '3d files storage' {
+            description 'Stores 3d files so that can be calculated'
+        }
+
+        shop = container 'shop' {
+            shop_ui = ui 'Internet Shop' {
+                description 'User can make an order, upload 3d model, work in 3d editor'
+                icon tech:vue
+                metadata {
+                    language 'TypeScript'
+                    framework 'Vue, ThreeJs'
+                }
+            }
+
+            shop_api = service 'Shop API' {
+                description '- provide list of shop items\n- receives user generated or uploaded 3d file\n- save information about order from customer perspective'
+                icon tech:spring
+                metadata {
+                    language 'Java'
+                    framework 'Spring Boot'
+                }
+            }
+
+            shop_db = database 'Shop DB' {
+                description 'Holds main information about work with customers and its orders'
+                icon tech:postgresql
+                metadata {
+                    engine 'PostgreSQL'
+                }
+            }
+        }
+
+        crm = container 'crm' {
+            crm_ui = ui 'CRM' {
+                description 'User can make an order, upload 3d model, work in 3d editor'
+                icon tech:vue
+                metadata {
+                    language 'TypeScript'
+                    framework 'Vue'
+                }
+            }
+
+            crm_api = service 'CRM API' {
+                icon tech:spring
+                metadata {
+                    language 'Java'
+                    framework 'Spring Boot'
+                }
+            }
+        }
+
+        mes = container 'mes' {
+            mes_ui = ui 'MES' {
+                description 'Provide interface to assign orders on operators, shows list of orders'
+                icon tech:react
+                metadata {
+                    language 'TypeScript'
+                    framework 'React'
+                }
+            }
+
+            mes_api = service 'MES API' {
+                description '- Assigns orders on operators\n- Shows list of orders\n- Calculate price of the order'
+                icon tech:csharp
+                metadata {
+                    language 'C#'
+                }
+            }
+
+            mes_db = database 'Shop DB' {
+                description 'Holds information about orders, its assignments on operators and statuses from MES perspective'
+                icon tech:postgresql
+                metadata {
+                    engine 'PostgreSQL'
+                }
+            }
+        }
+
+
+        ot = newService'OpenTelemetry Collector' {
+            icon tech:open-telemetry
+        }
+
+        jaeger = newService 'Jaeger' {
+            icon tech:jaeger
+        }
+        prometheus = newService 'Prometheus' {
+            icon tech:prometheus
+        }
+        alertmanager = newService 'AlertManager'
+        grafana = newService 'Grafana' {
+            icon tech:grafana
+        }
+        kibana = newService 'Kibana' {
+            icon tech:kibana
+        }
+        elasticsearch = newService 'ElasticSearch' {
+            icon tech:elasticsearch
+        }
+        logstash = newService 'LogStash' {
+            icon tech:logstash
+        }
+        redis = newdatabase 'Redis' {
+            icon tech:redis
+        }
+
+    }
+
+    // Shop
+    customer .uses shop_ui '' '' 'HTTPS'
+    shop_ui .uses shop_api '' '' 'HTTPS'
+    shop_api .uses shop_db '' '' 'TCP'
+    shop_api .upload s3 'uploads files'
+
+    // CRM
+    seller .uses crm '' '' 'HTTPS'
+    crm_ui .uses crm_api '' '' 'HTTPS'
+    crm_api .uses shop_db '' '' 'TCP'
+    crm_api .upload s3 'uploads files'
+    crm_api .produce rmq '' '' 'AMQP'
+    rmq .consume crm_api '' '' 'AMQP'
+
+    // MES
+    api_user .uses mes '' '' 'HTTPS'
+    operator .uses mes '' '' 'HTTPS'
+    mes_ui .uses mes_api '' '' 'HTTPS'
+    mes_api .uses mes_db '' '' 'TCP'
+    mes_api .upload s3 'uploads files'
+    mes_api .produce rmq '' '' 'AMQP'
+    rmq .consume mes_api '' '' 'AMQP'
+
+    // Monitoring
+    grafana .new_uses prometheus 'Визуализация метрик'
+    grafana .new_uses jaeger 'Визуализация метрик'
+    grafana .new_uses alertmanager 'Отправки алертов'
+    ot .trace jaeger 'Отправляет трейсы'
+
+    support .new_uses grafana 'Проверка работоспособности сервисов'
+    alertmanager .send support 'Уведомление о проблеме с сервисом'
+
+    prometheus .collect rmq 'Собирает метрики'
+    prometheus .collect s3 'Собирает метрики'
+    prometheus .collect shop_api 'Собирает метрики'
+    prometheus .collect shop_db 'Собирает метрики'
+    shop_api .new_uses ot 'Использует для формирования трейсов'
+    prometheus .collect crm_api 'Собирает метрики'
+    crm_api .new_uses ot 'Использует для формирования трейсов'
+    prometheus .collect mes_api 'Собирает метрики'
+    prometheus .collect mes_db 'Собирает метрики'
+    mes_api .new_uses ot 'Использует для формирования трейсов'
+
+    // Logging
+    kibana .new_uses elasticsearch 'Визуализация/поиск логов'
+    logstash .send elasticsearch  'Сборка логов'
+
+    support .new_uses kibana 'Проверка работоспособности сервисов'
+
+    shop_api .send logstash 'Отправляет логи'
+    shop_db .send logstash 'Отправляет логи'
+    crm_api .send logstash 'Отправляет логи'
+    mes_api .send logstash 'Отправляет логи'
+    mes_db .send logstash 'Отправляет логи'
+}
+
+views {
+    view of store {
+        include *, shop, crm, mes
+    }
+
+    view monitoring {
+        title 'Monitoring'
+
+        include shop.shop_api, shop_db, crm.crm_api, mes.mes_api, mes.mes_db, rmq, s3, grafana, prometheus, alertmanager, ot, jaeger, support
+    }
+
+    view logging {
+        title 'Logging'
+
+        include shop.shop_api, shop_db, crm.crm_api, mes.mes_api, mes.mes_db, kibana, elasticsearch, logstash, support
+    }
+
+    dynamic view caching_hit {
+        title 'Sequence diagrams / Cache-hit'
+
+        variant sequence
+
+        operator -> mes_ui 'Открыть дашборд / запрос «заказы в статусе X, страница 1»'
+        mes_ui -> mes_api 'HTTP GET `/orders?status=X&page=1&pageSize=N`'
+        mes_api -> redis 'GET mes:orders:list:X:1:N'
+        redis -> mes_api 'Cache возвращает список заказов.'
+        mes_api -> mes_ui 'Ответ с заказами (из кеша)'
+    }
+
+    dynamic view caching_miss {
+        title 'Sequence diagrams / Cache-miss'
+
+        variant sequence
+
+        operator -> mes_ui 'Открыть дашборд / запрос «заказы в статусе X, страница 1»'
+        mes_ui -> mes_api 'HTTP GET `/orders?status=X&page=1&pageSize=N`'
+        mes_api -> redis 'GET mes:orders:list:X:1:N'
+        redis -> mes_api 'Cache возвращает null'
+        mes_api -> mes_db 'Запрос `SELECT ... FROM orders WHERE status=X ORDER BY updated_at DESC LIMIT ... OFFSET ...`'
+        mes_db -> mes_api 'Выборка'
+        mes_api -> redis 'SET mes:orders:list:X:1:N = result, EX=TTL'
+        mes_api -> mes_ui 'Ответ с заказами (из кеша)'
+    }
+
+    dynamic view caching_invalidate {
+        title 'Sequence diagrams / Cache-invalidate'
+
+        variant sequence
+
+        operator -> mes_ui '«Взять заказ в работу» / Изменить статус'
+        mes_ui -> mes_api 'HTTP POST `/orders/{orderId}/status` `{ newStatus = MANUFACTURING_STARTED }`'
+        mes_api -> mes_db 'Обновление статуса заказа'
+        mes_db -> mes_api 'Подтверждение'
+        mes_api -> redis 'Инвалидация ключей, где заказ может фигурировать'
+        mes_api -> rmq 'Публикация события в RabbitMQ'
+        mes_api -> mes_ui 'Успешный ответ'
+    }
+}
