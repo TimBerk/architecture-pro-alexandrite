@@ -1,0 +1,21 @@
+[project]
+name = "service-a"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "flask",
+    "httpx",
+    "requests",
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    "opentelemetry-instrumentation-flask",
+    "opentelemetry-instrumentation-requests",
+    "opentelemetry-exporter-otlp",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.9",
+]
